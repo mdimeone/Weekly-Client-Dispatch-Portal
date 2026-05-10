@@ -158,6 +158,34 @@ def normalize_case_flags(path: Path) -> pd.DataFrame:
     return case_df[["CS", "Escalation Status", "Escalated Flag", "Warning Flag", "RCE Remote Support Flag", "Visit Count", "Region"]].drop_duplicates("CS")
 
 
+def extract_rce_from_detail_sheet(path: Path) -> pd.DataFrame:
+    """Extract RCE flags from Detail sheet's 'Next Steps' column."""
+    try:
+        detail_df = read_sheet_with_inferred_header(
+            path,
+            "Detail",
+            ["Case number"],
+            keep_columns=["Case number", "Next Steps"],
+        )
+    except Exception:
+        return pd.DataFrame(columns=["CS", "RCE Remote Support Flag"])
+
+    rename_map = {"Case number": "CS"}
+    detail_df = detail_df.rename(columns={k: v for k, v in rename_map.items() if k in detail_df.columns})
+    
+    if "CS" not in detail_df.columns:
+        return pd.DataFrame(columns=["CS", "RCE Remote Support Flag"])
+    
+    for col in detail_df.columns:
+        if detail_df[col].dtype == object:
+            detail_df[col] = detail_df[col].map(clean_text)
+    
+    next_steps = detail_df.get("Next Steps", pd.Series("", index=detail_df.index)).astype(str).str.lower()
+    detail_df["RCE Remote Support Flag"] = next_steps.str.contains(r"rce", regex=True, na=False)
+    
+    return detail_df[["CS", "RCE Remote Support Flag"]].drop_duplicates("CS")
+
+
 def normalize_dispatch_df(path: Path) -> pd.DataFrame:
     with pd.ExcelFile(path) as xl:
         first_sheet = xl.sheet_names[0]
@@ -243,6 +271,15 @@ def build_dispatch_dataset(case_file: Path) -> pd.DataFrame:
         if "Region_case" in dispatch_df.columns:
             dispatch_df["Region"] = dispatch_df["Region"].where(dispatch_df["Region"].ne("Non-US / Unknown"), dispatch_df["Region_case"])
             dispatch_df = dispatch_df.drop(columns=["Region_case"])
+    
+    # Extract RCE flags from Detail sheet (takes precedence over Per_Case_Dashboard)
+    detail_rce = extract_rce_from_detail_sheet(case_file)
+    if not detail_rce.empty:
+        dispatch_df = dispatch_df.merge(detail_rce, on="CS", how="left", suffixes=("", "_detail"))
+        if "RCE Remote Support Flag_detail" in dispatch_df.columns:
+            dispatch_df["RCE Remote Support Flag"] = dispatch_df["RCE Remote Support Flag_detail"].fillna(dispatch_df.get("RCE Remote Support Flag", False))
+            dispatch_df = dispatch_df.drop(columns=["RCE Remote Support Flag_detail"])
+    
     for col in ["Escalated Flag", "Warning Flag", "RCE Remote Support Flag"]:
         dispatch_df[col] = pd.Series(dispatch_df.get(col, False)).astype("boolean").fillna(False).astype(bool)
     dispatch_df["Visit Count"] = pd.to_numeric(dispatch_df.get("Visit Count", 0), errors="coerce").fillna(0).astype(np.int32)

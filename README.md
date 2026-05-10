@@ -162,8 +162,18 @@ The first sheet should contain work order information with headers like:
 | State / Province | State |
 | City | City / Town, Town |
 
-#### Sheet 2: Case Dashboard (`Per_Case_Dashboard`)
-Optional sheet for case-level flags:
+#### Sheet 2: Detail Sheet (`Detail`) - *Primary source for RCE flags*
+Optional sheet for case-level details and RCE flag detection:
+
+| Column Name | Purpose |
+|-------------|---------|
+| Case Number | Links to dispatch data for case matching |
+| Next Steps | Scanned for "RCE" keyword to detect remote support requirements |
+
+**Note**: The Detail sheet is the primary source for RCE flag detection. If present, it will be used. Otherwise, the Per_Case_Dashboard sheet is used as a fallback.
+
+#### Sheet 3: Case Dashboard (`Per_Case_Dashboard`) - *Fallback for additional flags*
+Optional sheet for case-level flags (used when Detail sheet is not available):
 
 | Required Headers | Purpose |
 |------------------|---------|
