@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
-from dash import Dash, Input, Output, State, dcc, html
+from dash import Dash, Input, Output, State, ctx, dcc, html
 from dash.exceptions import PreventUpdate
 
 
@@ -33,6 +33,8 @@ CURRENT_FILE = Path(os.environ.get("CURRENT_FILE", str(DATA_DIR / DEFAULT_UPLOAD
 MAX_UPLOAD_SIZE_BYTES = 25 * 1024 * 1024
 APP_TIMEZONE = ZoneInfo(os.environ.get("APP_TIMEZONE", "America/New_York"))
 SHORT_DESCRIPTION_MAX_LEN = 160
+DEFAULT_THEME = "default"
+THEME_OPTIONS = ("default", "canyon", "forest")
 
 DATA_LOCK = RLock()
 DATA_CACHE = {
@@ -319,6 +321,12 @@ def get_cached_dispatch_df() -> pd.DataFrame:
     return empty_dispatch_df()
 
 
+def get_cached_source_path() -> Path | None:
+    with DATA_LOCK:
+        src = DATA_CACHE.get("source_path")
+    return src if isinstance(src, Path) else None
+
+
 def dispatch_filter_options(dispatch_df: pd.DataFrame) -> tuple[list[str], list[str], list[str], list[str]]:
     if dispatch_df.empty:
         return [], [], [], []
@@ -502,10 +510,17 @@ def build_dispatch_layout(dispatch_df: pd.DataFrame, source_path: Path | None) -
     return html.Div([
         dcc.Store(id="refresh-store", data={"last_refresh": friendly_dt(current_timestamp())}),
         dcc.Store(id="upload-signal", data={"ts": None}),
+        dcc.Store(id="theme-store", data={"theme": DEFAULT_THEME}),
         html.Div([
             html.H1("Weekly Client Dispatch Board"),
             html.Div(id="timestamp-line", children=f"Source file updated: {source_file_mtime} | Board refreshed: {friendly_dt(current_timestamp())}"),
             html.Div(id="source-status", children=upload_prompt),
+            html.Div([
+                html.Span("Palette:", className="theme-label"),
+                html.Button("Default", id="theme-default-button", n_clicks=0, className="theme-pill"),
+                html.Button("Canyon", id="theme-canyon-button", n_clicks=0, className="theme-pill"),
+                html.Button("Forest", id="theme-forest-button", n_clicks=0, className="theme-pill"),
+            ], className="theme-switcher"),
         ], className="header"),
         html.Div([
             dcc.Dropdown(id="week-select", options=[{"label": x, "value": x} for x in week_options], value=current_week, clearable=False, style={"width": "180px"}),
@@ -521,7 +536,7 @@ def build_dispatch_layout(dispatch_df: pd.DataFrame, source_path: Path | None) -
         ], className="toolbar"),
         html.Div("Clients appear only if they have scheduled work in the selected week.", className="filters-label"),
         html.Div(id="dispatch-board-container"),
-    ], className="wrapper")
+    ], id="app-wrapper", className=f"wrapper theme-{DEFAULT_THEME}")
 
 
 def create_app(case_file: Path | None) -> Dash:
@@ -529,7 +544,34 @@ def create_app(case_file: Path | None) -> Dash:
     update_data_cache(dispatch_df, source_path)
     app = Dash(__name__)
     app.title = "Weekly Client Dispatch Board"
-    app.layout = build_dispatch_layout(dispatch_df, source_path)
+    app.layout = lambda: build_dispatch_layout(get_cached_dispatch_df(), get_cached_source_path())
+
+    @app.callback(
+        Output("theme-store", "data"),
+        Output("app-wrapper", "className"),
+        Output("theme-default-button", "className"),
+        Output("theme-canyon-button", "className"),
+        Output("theme-forest-button", "className"),
+        Input("theme-default-button", "n_clicks"),
+        Input("theme-canyon-button", "n_clicks"),
+        Input("theme-forest-button", "n_clicks"),
+        State("theme-store", "data"),
+    )
+    def switch_theme(_default_clicks, _canyon_clicks, _forest_clicks, theme_state):
+        current_theme = (theme_state or {}).get("theme", DEFAULT_THEME)
+        trigger = ctx.triggered_id
+        if trigger == "theme-forest-button":
+            next_theme = "forest"
+        elif trigger == "theme-canyon-button":
+            next_theme = "canyon"
+        elif trigger == "theme-default-button":
+            next_theme = "default"
+        else:
+            next_theme = current_theme if current_theme in THEME_OPTIONS else DEFAULT_THEME
+        default_class = "theme-pill active" if next_theme == "default" else "theme-pill"
+        canyon_class = "theme-pill active" if next_theme == "canyon" else "theme-pill"
+        forest_class = "theme-pill active" if next_theme == "forest" else "theme-pill"
+        return {"theme": next_theme}, f"wrapper theme-{next_theme}", default_class, canyon_class, forest_class
 
     @app.callback(
         Output("refresh-store", "data"),
@@ -545,7 +587,10 @@ def create_app(case_file: Path | None) -> Dash:
         now_txt = friendly_dt(current_timestamp())
         prompt = ""
         try:
-            source_txt = friendly_dt(file_mtime_timestamp(src))
+            active_src = src or get_cached_source_path()
+            if not active_src:
+                raise FileNotFoundError("No workbook loaded")
+            source_txt = friendly_dt(file_mtime_timestamp(active_src))
         except Exception:
             source_txt = "No workbook loaded"
             prompt = "Upload Cases_Final_Dashboard_CURRENT.xlsx to load the board."
@@ -640,40 +685,126 @@ def create_app(case_file: Path | None) -> Dash:
     app.index_string = """
     <!DOCTYPE html><html><head>{%metas%}<title>{%title%}</title>{%favicon%}{%css%}
     <style>
-    body { font-family: Arial, Helvetica, sans-serif; margin: 0; background: #f4f7fb; color: #1f2937; }
-    .header { background: #0f3b5f; color: white; padding: 20px 24px; }
+    :root {
+      --bg-page: #f4f7fb;
+      --text-main: #1f2937;
+      --header-bg: #0f3b5f;
+      --header-text: #ffffff;
+      --text-muted: #5b6675;
+      --button-bg: #0f3b5f;
+      --button-border: #0a2942;
+      --panel-bg: #ffffff;
+      --panel-shadow: rgba(0, 0, 0, 0.08);
+      --table-border-bottom: #dbe4ef;
+      --table-border-right: #edf2f7;
+      --table-head-bg: #eaf1f8;
+      --sticky-bg: #f8fbff;
+      --chip-border: #dbe7f3;
+      --chip-left: #4c78a8;
+      --chip-bg: #fafdff;
+      --chip-muted: #5b6675;
+      --chip-tags: #334e68;
+      --chip-summary: #44556b;
+      --flag-bg: #fff9df;
+      --pill-bg: rgba(255, 255, 255, 0.15);
+      --pill-border: rgba(255, 255, 255, 0.45);
+      --pill-text: #ffffff;
+      --pill-active-bg: #ffffff;
+      --pill-active-text: #0f3b5f;
+    }
+    .wrapper.theme-canyon {
+      --bg-page: #f7f2e8;
+      --text-main: #2e2a24;
+      --header-bg: #b69058;
+      --header-text: #fff9ef;
+      --text-muted: #6e6556;
+      --button-bg: #9b7440;
+      --button-border: #7f5d31;
+      --panel-bg: #fffaf1;
+      --panel-shadow: rgba(94, 73, 46, 0.16);
+      --table-border-bottom: #e8dcc8;
+      --table-border-right: #f0e8d8;
+      --table-head-bg: #f1e6d3;
+      --sticky-bg: #fbf5ea;
+      --chip-border: #e0d3bd;
+      --chip-left: #8f7a57;
+      --chip-bg: #fffcf4;
+      --chip-muted: #6f6658;
+      --chip-tags: #5b4d3a;
+      --chip-summary: #635748;
+      --flag-bg: #fff1cf;
+      --pill-bg: rgba(255, 249, 239, 0.2);
+      --pill-border: rgba(255, 249, 239, 0.6);
+      --pill-text: #fff9ef;
+      --pill-active-bg: #fff9ef;
+      --pill-active-text: #5a4528;
+    }
+    .wrapper.theme-forest {
+      --bg-page: #dce8dd;
+      --text-main: #18261b;
+      --header-bg: #1f4f2c;
+      --header-text: #f4fff1;
+      --text-muted: #3f5e46;
+      --button-bg: #2f6b3d;
+      --button-border: #184526;
+      --panel-bg: #f3fbf2;
+      --panel-shadow: rgba(13, 44, 20, 0.24);
+      --table-border-bottom: #bfd3c2;
+      --table-border-right: #d9e7db;
+      --table-head-bg: #cfe1d1;
+      --sticky-bg: #e5f1e6;
+      --chip-border: #b7cfbb;
+      --chip-left: #2d6a3b;
+      --chip-bg: #f7fff5;
+      --chip-muted: #3d5d45;
+      --chip-tags: #1f4e2d;
+      --chip-summary: #31533a;
+      --flag-bg: #e5f4cc;
+      --pill-bg: rgba(244, 255, 241, 0.18);
+      --pill-border: rgba(244, 255, 241, 0.6);
+      --pill-text: #f4fff1;
+      --pill-active-bg: #f4fff1;
+      --pill-active-text: #1f4f2c;
+    }
+    body { font-family: Arial, Helvetica, sans-serif; margin: 0; background: var(--bg-page); color: var(--text-main); }
+    .header { background: var(--header-bg); color: var(--header-text); padding: 20px 24px; }
     .header h1 { margin: 0 0 8px 0; font-size: 28px; letter-spacing: 0; }
+    .theme-switcher { display:flex; align-items:center; gap:8px; margin-top:12px; flex-wrap:wrap; }
+    .theme-label { font-size:12px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; opacity:0.9; }
+    .theme-pill { background: var(--pill-bg); color: var(--pill-text); border:1px solid var(--pill-border); border-radius:999px; padding:6px 12px; font-size:12px; font-weight:700; }
+    .theme-pill.active { background: var(--pill-active-bg); color: var(--pill-active-text); border-color: var(--pill-active-bg); }
+    .theme-pill:hover { filter: brightness(1.04); }
     .wrapper { padding: 0 0 20px 0; }
     .toolbar { display:flex; gap:12px; align-items:center; margin: 16px 20px 12px 20px; flex-wrap: wrap; }
-    .filters-label { margin: 0 20px 12px 20px; color:#5b6675; }
-    .upload-status { color:#1f2937; max-width: 520px; }
-    button { background:#0f3b5f; color:#fff; border:2px solid #0a2942; border-radius:9px; padding:8px 12px; cursor:pointer; font-weight:600; }
-    .panel { background:#fff; border-radius:14px; padding:12px; box-shadow:0 1px 7px rgba(0,0,0,.08); margin: 0 20px; }
+    .filters-label { margin: 0 20px 12px 20px; color:var(--text-muted); }
+    .upload-status { color:var(--text-main); max-width: 520px; }
+    button { background:var(--button-bg); color:var(--header-text); border:2px solid var(--button-border); border-radius:9px; padding:8px 12px; cursor:pointer; font-weight:600; }
+    .panel { background:var(--panel-bg); border-radius:14px; padding:12px; box-shadow:0 1px 7px var(--panel-shadow); margin: 0 20px; }
     .dispatch-wrap { margin: 0 0 8px 0; overflow:auto; cursor: grab; }
     .dispatch-wrap.dragging { cursor: grabbing; user-select:none; }
     .dispatch-top-scroll { margin: 0 0 8px 0; overflow-x:auto; overflow-y:hidden; height:16px; position:relative; z-index:1; }
     .dispatch-top-scroll-inner { height:1px; }
     .dispatch-table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; font-size: 12px; table-layout: fixed; }
-    .dispatch-table th, .dispatch-table td { border-bottom:3px solid #dbe4ef; border-right:3px solid #edf2f7; padding:6px; vertical-align: top; background:#fff; min-width:135px; }
-    .dispatch-table thead th { position: sticky; top: 0; z-index: 4; background:#eaf1f8; border-top:3px solid #dbe4ef; }
-    .dispatch-table .sticky-col { position: sticky; background:#f8fbff; z-index: 5; min-width:92px; max-width:92px; }
-    .dispatch-table .sticky-col-1 { left: 0; min-width:160px; max-width:160px; z-index: 6; }
+    .dispatch-table th, .dispatch-table td { border-bottom:3px solid var(--table-border-bottom); border-right:3px solid var(--table-border-right); padding:6px; vertical-align: top; background:var(--panel-bg); min-width:135px; }
+    .dispatch-table thead th { position: sticky; top: 0; z-index: 4; background:var(--table-head-bg); border-top:3px solid var(--table-border-bottom); }
+    .dispatch-table .sticky-col { position: sticky; background:var(--sticky-bg); z-index: 5; min-width:92px; max-width:92px; width:92px; box-sizing:border-box; }
+    .dispatch-table .sticky-col-1 { left: 0; min-width:160px; max-width:160px; width:160px; z-index: 6; }
     .dispatch-table .sticky-col-2 { left: 160px; }
     .dispatch-table .sticky-col-3 { left: 252px; }
     .dispatch-table .sticky-col-4 { left: 344px; }
     .dispatch-table .sticky-col-5 { left: 436px; }
     .dispatch-table .sticky-col-6 { left: 528px; }
-    .dispatch-table .sticky-col-7 { left: 620px; min-width:110px; max-width:110px; }
-    .wo-chip { border:1px solid #dbe7f3; border-left:4px solid #4c78a8; border-radius:8px; padding:4px 6px; margin-bottom:5px; background:#fafdff; width:100%; box-sizing:border-box; display:block; }
+    .dispatch-table .sticky-col-7 { left: 620px; min-width:110px; max-width:110px; width:110px; }
+    .wo-chip { border:1px solid var(--chip-border); border-left:4px solid var(--chip-left); border-radius:8px; padding:4px 6px; margin-bottom:5px; background:var(--chip-bg); width:100%; box-sizing:border-box; display:block; }
     .wo-chip.escalated { border-left-color:#d62728; background:#fff5f5; }
     .wo-chip.warning { border-left-color:#ff7f0e; background:#fff9ef; }
     .wo-chip.rce { border-left-color:#1f77b4; background:#f4f9ff; }
     .chip-line { line-height:1.1; margin-bottom:1px; }
     .chip-strong { font-weight:700; }
-    .chip-small { font-size:10px; color:#5b6675; }
-    .chip-tags { font-size:11px; color:#334e68; margin-top:4px; }
-    .chip-summary { color:#44556b; white-space: normal; overflow-wrap: anywhere; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
-    .dispatch-row.flagged > td.sticky-col-7 { background:#fff9df; }
+    .chip-small { font-size:10px; color:var(--chip-muted); }
+    .chip-tags { font-size:11px; color:var(--chip-tags); margin-top:4px; }
+    .chip-summary { color:var(--chip-summary); white-space: normal; overflow-wrap: anywhere; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    .dispatch-row.flagged > td.sticky-col-7 { background:var(--flag-bg); }
     .dispatch-row.escalated-row > td.sticky-col-1 { border-left:4px solid #d62728; }
     .dispatch-row.warning-row > td.sticky-col-1 { border-left:4px solid #ff7f0e; }
     .dispatch-row.rce-row > td.sticky-col-1 { border-left:4px solid #1f77b4; }

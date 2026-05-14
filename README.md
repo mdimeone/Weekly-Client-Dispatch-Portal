@@ -29,6 +29,12 @@ Automatic detection and visual highlighting of:
 - Weekend visibility toggle
 - "Show only flagged rows" option
 
+### Theme Palette (Default + Canyon + Forest)
+- Pill button selector in the header (`Default`, `Canyon`, `Forest`)
+- Instant recoloring across header, controls, panels, table, and chips
+- Palette selection is retained in app state for the active session
+- Default palette restored, with `Canyon` and a higher-contrast `Forest` variant
+
 ### 📤 Data Management
 - **Upload New Data**: Drag-and-drop Excel file uploads
 - **Automatic Validation**: File format and size checks
@@ -261,6 +267,13 @@ Modify the inline CSS in the `app.index_string` property to change:
 - Responsive behavior
 - Typography
 
+### Built-in Palettes
+- Default: original blue board styling
+- Canyon: warm tan and neutral tones
+- Forest: higher-contrast green earth-tone palette
+
+Switch between palettes using the header pill buttons while the app is running.
+
 ---
 
 ## Troubleshooting
@@ -284,6 +297,11 @@ Modify the inline CSS in the `app.index_string` property to change:
 ### Table Scrolling Issues
 - Sticky columns not aligning
 - **Solution**: Refresh browser page; check browser console for JavaScript errors
+- Recent updates improved sticky-column left-offset anchoring to reduce overlap/cropping while horizontal scrolling
+
+### Header Says "No workbook loaded" After Browser Refresh
+- Board data appears but source status message looks stale
+- **Solution**: Updated app layout/render flow now rehydrates header source status from cached active workbook on reload
 
 ### Memory/Performance Issues
 - Large Excel files (>10,000 rows) causing slowdown
@@ -417,3 +435,4 @@ A: Not built-in, but you can screenshare or export the source Excel with specifi
 ---
 
 **Last Updated**: May 7, 2026
+
